@@ -11,10 +11,9 @@ from ops import *
 from vgg19 import *
 from dataloader.dataloader_DIV2K import *
 import modules
-from math import sqrt as sqrt
 
 class WESPE(object):
-    def __init__(self, sess, config, dataset_phone, dataset_canon, dataset_DIV2K):
+    def __init__(self, sess, config, dataset_phone, dataset_DIV2K):
         # copy training parameters
         self.sess = sess
         self.config = config
@@ -30,7 +29,6 @@ class WESPE(object):
         
         self.dataset_name = config.dataset_name
         self.dataset_phone = dataset_phone
-        self.dataset_canon = dataset_canon
         self.dataset_DIV2K = dataset_DIV2K
         
         # loss weights
@@ -38,17 +36,9 @@ class WESPE(object):
         self.w_texture = config.w_texture 
         self.w_color = config.w_color
         self.w_tv = config.w_tv
-        self.gamma = config.gamma
-
-        #total losses
-        self.total_color_loss = 0
-        self.total_var_loss = 0
-        self.total_texture_loss = 0
-        self.total_content_loss = 0
-
+        
         # patches for training (fixed size)
-        self.phone_patch = tf.placeholder(tf.float32, [self.batch_size, self.patch_size, self.patch_size, self.channels], name='input_phone_patch')
-        self.canon_patch = tf.placeholder(tf.float32, [self.batch_size, self.patch_size, self.patch_size, self.channels], name='input_canon_patch')
+        self.phone_patch = tf.placeholder(tf.float32, [self.batch_size, self.patch_size, self.patch_size, self.channels], name='input_phone_patch') 
         self.DIV2K_patch = tf.placeholder(tf.float32, [self.batch_size, self.patch_size, self.patch_size, self.channels], name='input_DIV2K_patch') 
         
         # images for testing (unknown size)
@@ -68,15 +58,14 @@ class WESPE(object):
         
         self.saver = tf.train.Saver(tf.trainable_variables())
 
-
     def build_generator(self):
         self.enhanced_patch = modules.generator_network(self.phone_patch, var_scope = 'generator')
-        #self.reconstructed_patch = modules.generator_network(self.enhanced_patch, var_scope = 'generator_inverse')
+        self.reconstructed_patch = modules.generator_network(self.enhanced_patch, var_scope = 'generator_inverse')
         
         self.enhanced_test = modules.generator_network(self.phone_test, var_scope = 'generator')
-        #self.reconstructed_test = modules.generator_network(self.enhanced_test, var_scope = 'generator_inverse')
+        self.reconstructed_test = modules.generator_network(self.enhanced_test, var_scope = 'generator_inverse')
         self.enhanced_test_unknown = modules.generator_network(self.phone_test_unknown, var_scope = 'generator')
-        #self.reconstructed_test_unknown = modules.generator_network(self.enhanced_test_unknown, var_scope = 'generator_inverse')
+        self.reconstructed_test_unknown = modules.generator_network(self.enhanced_test_unknown, var_scope = 'generator_inverse')
         
         variables = tf.trainable_variables()
         self.g_var = [x for x in variables if 'generator' in x.name]
@@ -85,8 +74,8 @@ class WESPE(object):
 
     def build_generator_loss(self):
         # content loss (vgg feature distance between original & reconstructed)
-        original_vgg = net(self.vgg_dir, self.canon_patch * 255)
-        reconstructed_vgg = net(self.vgg_dir, self.enhanced_patch * 255)
+        original_vgg = net(self.vgg_dir, self.phone_patch * 255)
+        reconstructed_vgg = net(self.vgg_dir, self.reconstructed_patch * 255)
         self.content_loss = tf.reduce_mean(tf.square(original_vgg[self.content_layer] - reconstructed_vgg[self.content_layer])) 
         
         # color loss (gan, enhanced-DIV2K)
@@ -96,26 +85,19 @@ class WESPE(object):
         self.texture_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_texture, self.logits_enhanced_texture))
         
         # tv loss (total variation of enhanced)
-        self.tv_loss = tf.reduce_mean(tf.abs(tf.image.total_variation(self.enhanced_patch)-tf.image.total_variation(self.canon_patch)))
+        self.tv_loss = tf.reduce_mean(tf.image.total_variation(self.enhanced_patch))
         
-        #computing expected mean sq.loss
-#         self.total_content_loss = self.gamma*self.total_content_loss+(1-self.gamma)*tf.square(self.content_loss)
-#         self.total_var_loss = self.gamma*self.total_var_loss+(1-self.gamma)*tf.square(self.tv_loss)
-#         self.total_color_loss = self.gamma*self.total_color_loss+(1-self.gamma)*tf.square(self.color_loss)
-#         self.total_texture_loss = self.gamma*self.total_texture_loss+(1-self.gamma)*tf.square(self.texture_loss)
-
         # calculate generator loss as a weighted sum of the above 4 losses
-#         self.G_loss = (1-self.gamma)*(tf.square(self.color_loss) * self.w_color/tf.sqrt(self.total_color_loss) + tf.square(self.texture_loss) * self.w_texture/tf.sqrt(self.total_texture_loss) + tf.square(self.content_loss) * self.w_content/tf.sqrt(self.total_content_loss) + tf.square(self.tv_loss) * self.w_tv/tf.sqrt(self.total_var_loss))
-        self.G_loss = self.w_content*self.content_loss+self.w_color*self.color_loss+self.w_texture*self.texture_loss+self.w_tv*self.tv_loss
+        self.G_loss = self.color_loss * self.w_color + self.texture_loss * self.w_texture + self.content_loss * self.w_content + self.tv_loss * self.w_tv
         self.G_optimizer = tf.train.AdamOptimizer(self.config.learning_rate).minimize(self.G_loss, var_list=self.g_var)
     
     def build_discriminator(self): 
-        self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'blur')
-#         self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'none')
-        self.logits_DIV2K_texture, _ = modules.discriminator_network(self.canon_patch, var_scope = 'discriminator_texture', preprocess = 'gray')
+        #self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'blur')
+        self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'none')
+        self.logits_DIV2K_texture, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_texture', preprocess = 'gray')
         
-        self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'blur')
-#         self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'none')
+        #self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'blur')
+        self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'none')
         self.logits_enhanced_texture, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_texture', preprocess = 'gray')
         
         #_, self.prob = modules.discriminator_network(self.phone_test)
@@ -149,17 +131,16 @@ class WESPE(object):
             print(" Overall training starts from beginning")
         start = time.time()
         for i in range(0, self.config.train_iter):
-            phone_batch, canon_batch, DIV2K_batch = get_batch(self.dataset_phone, self.dataset_canon, self.dataset_DIV2K, self.config)
-            _, enhanced_batch = self.sess.run([self.G_optimizer, self.enhanced_patch] , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
+            phone_batch, DIV2K_batch = get_batch(self.dataset_phone, self.dataset_DIV2K, self.config)
+            _, enhanced_batch = self.sess.run([self.G_optimizer, self.enhanced_patch] , feed_dict={self.phone_patch:phone_batch, self.DIV2K_patch:DIV2K_batch})
             _ = self.sess.run(self.D_optimizer_color , feed_dict={self.phone_patch:phone_batch, self.DIV2K_patch:DIV2K_batch})
-            _ = self.sess.run(self.D_optimizer_texture , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch})
+            _ = self.sess.run(self.D_optimizer_texture , feed_dict={self.phone_patch:phone_batch, self.DIV2K_patch:DIV2K_batch})
+            
             if i %self.config.test_every == 0:
-                phone_batch, canon_batch, DIV2K_batch = get_batch(self.dataset_phone, self.dataset_canon, self.dataset_DIV2K, self.config)
-                print(phone_batch.shape,canon_batch.shape,DIV2K_batch.shape)
-                g_loss, color_loss, texture_loss, content_loss, tv_loss = self.sess.run([self.G_loss, self.color_loss, self.texture_loss, self.content_loss, self.tv_loss] , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
+                phone_batch, DIV2K_batch = get_batch(self.dataset_phone, self.dataset_DIV2K, self.config)
+                g_loss, color_loss, texture_loss, content_loss, tv_loss = self.sess.run([self.G_loss, self.color_loss, self.texture_loss, self.content_loss, self.tv_loss] , feed_dict={self.phone_patch:phone_batch, self.DIV2K_patch:DIV2K_batch})
                 print("Iteration %d, runtime: %.3f s, generator loss: %.6f" %(i, time.time()-start, g_loss))      
-                print("Loss per component: content %.6f, color %.6f, texture %.6f, tv %.6f" %(content_loss, color_loss, texture_loss, tv_loss))
-                #print("Loss per component: total_content %.4f, total_color %.4f, total_texture %.4f, total_tv %.4f" %(sqrt(total_content_loss), sqrt(total_color_loss), sqrt(total_texture_loss), sqrt(total_var_loss)))
+                print("Loss per component: content %.6f, color %.6f, texture %.6f, tv %.6f" %(content_loss, color_loss, texture_loss, tv_loss)) 
                 # during training, test for only patches (full image testing incurs memory issues...)
                 self.test_generator(200, 0)
                 self.save()
@@ -175,38 +156,35 @@ class WESPE(object):
         start = time.time()
         test_list_phone = sorted(glob(self.config.test_path_phone_patch))
 
-        #PSNR_phone_reconstructed_list = np.zeros([test_num_patch])
+        PSNR_phone_reconstructed_list = np.zeros([test_num_patch])
         PSNR_phone_enhanced_list = np.zeros([test_num_patch])
 
         indexes = []
         for i in range(test_num_patch):
             index = np.random.randint(len(test_list_phone))
             indexes.append(index)
-            test_img = scipy.misc.imread(test_list_phone[index], mode = "RGB").astype("float32")
-            test_patch_phone = get_patch(test_img,self.config.patch_size)
-            test_patch_phone = preprocess(test_patch_phone)
+            test_patch_phone = preprocess(scipy.misc.imread(test_list_phone[index], mode = "RGB").astype("float32"))
 
-            test_patch_enhanced= self.sess.run([self.enhanced_test] , feed_dict={self.phone_test:[test_patch_phone]})
+            test_patch_enhanced, test_patch_reconstructed = self.sess.run([self.enhanced_test, self.reconstructed_test] , feed_dict={self.phone_test:[test_patch_phone]})
             if i % 50 == 0:
-                #print(test_patch_enhanced[0].shape)
                 imageio.imwrite(("./samples_DIV2K/%s/patch/phone_%d.png" %(self.config.dataset_name, i)), postprocess(test_patch_phone))
-                imageio.imwrite(("./samples_DIV2K/%s/patch/enhanced_%d.png" %(self.config.dataset_name,i)), postprocess(test_patch_enhanced[0][0]))
-                #imageio.imwrite(("./samples_DIV2K/%s/patch/reconstructed_%d.png" %(self.config.dataset_name,i)), postprocess(test_patch_reconstructed[0]))
+                imageio.imwrite(("./samples_DIV2K/%s/patch/enhanced_%d.png" %(self.config.dataset_name,i)), postprocess(test_patch_enhanced[0]))
+                imageio.imwrite(("./samples_DIV2K/%s/patch/reconstructed_%d.png" %(self.config.dataset_name,i)), postprocess(test_patch_reconstructed[0]))
             #print(enhanced_test_patch.shape)
             PSNR = calc_PSNR(postprocess(test_patch_enhanced[0]), postprocess(test_patch_phone))
             #print("PSNR: %.3f" %PSNR)
             PSNR_phone_enhanced_list[i] = PSNR
 
-            #PSNR = calc_PSNR(postprocess(test_patch_reconstructed[0]), postprocess(test_patch_phone))
+            PSNR = calc_PSNR(postprocess(test_patch_reconstructed[0]), postprocess(test_patch_phone))
             #print("PSNR: %.3f" %PSNR)
-            #PSNR_phone_reconstructed_list[i] = PSNR
-        print("(runtime: %.3f s) Average test PSNR for %d random test image patches: phone-enhanced %.3f" %(time.time()-start, test_num_patch, np.mean(PSNR_phone_enhanced_list)))
+            PSNR_phone_reconstructed_list[i] = PSNR
+        print("(runtime: %.3f s) Average test PSNR for %d random test image patches: phone-enhanced %.3f, phone-reconstructed %.3f" %(time.time()-start, test_num_patch, np.mean(PSNR_phone_enhanced_list), np.mean(PSNR_phone_reconstructed_list) ))
         
         # test for images
         start = time.time()
         test_list_phone = sorted(glob(self.config.test_path_phone_image))
         PSNR_phone_enhanced_list = np.zeros([test_num_image])
-        #PSNR_phone_reconstructed_list = np.zeros([test_num_image])
+        PSNR_phone_reconstructed_list = np.zeros([test_num_image])
 
         indexes = []
         for i in range(test_num_image):
@@ -215,19 +193,19 @@ class WESPE(object):
             indexes.append(index)
             test_image_phone = preprocess(scipy.misc.imread(test_list_phone[index], mode = "RGB").astype("float32"))
 
-            test_image_enhanced = self.sess.run([self.enhanced_test_unknown] , feed_dict={self.phone_test_unknown:[test_image_phone]})
+            test_image_enhanced, test_image_reconstructed = self.sess.run([self.enhanced_test_unknown, self.reconstructed_test_unknown] , feed_dict={self.phone_test_unknown:[test_image_phone]})
             imageio.imwrite(("./samples_DIV2K/%s/image/phone_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_phone))
-            imageio.imwrite(("./samples_DIV2K/%s/image/enhanced_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_enhanced[0][0]))
-            #imageio.imwrite(("./samples_DIV2K/%s/image/reconstructed_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_reconstructed[0]))
+            imageio.imwrite(("./samples_DIV2K/%s/image/enhanced_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_enhanced[0]))
+            imageio.imwrite(("./samples_DIV2K/%s/image/reconstructed_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_reconstructed[0]))
             
             PSNR = calc_PSNR(postprocess(test_image_enhanced[0]), postprocess(test_image_phone))
             #print("PSNR: %.3f" %PSNR)
             PSNR_phone_enhanced_list[i] = PSNR
             
-            #PSNR = calc_PSNR(postprocess(test_image_reconstructed[0]), postprocess(test_image_phone))
-            #PSNR_phone_reconstructed_list[i] = PSNR
+            PSNR = calc_PSNR(postprocess(test_image_reconstructed[0]), postprocess(test_image_phone))
+            PSNR_phone_reconstructed_list[i] = PSNR
         if test_num_image > 0:
-            print("(runtime: %.3f s) Average test PSNR for %d random full test images: original-enhanced %.3f" %(time.time()-start, test_num_image, np.mean(PSNR_phone_enhanced_list)))
+            print("(runtime: %.3f s) Average test PSNR for %d random full test images: original-enhanced %.3f, original-reconstructed %.3f" %(time.time()-start, test_num_image, np.mean(PSNR_phone_enhanced_list), np.mean(PSNR_phone_reconstructed_list)))
 
     def save(self):
         model_name = self.config.model_name

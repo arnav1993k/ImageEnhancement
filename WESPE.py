@@ -88,7 +88,7 @@ class WESPE(object):
         self.texture_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_dslr_texture, self.logits_enhanced_texture))
         
         # tv loss (total variation of enhanced)
-        self.tv_loss = tf.reduce_mean(tf.image.total_variation(self.enhanced_patch))
+        self.tv_loss = tf.reduce_mean(tf.abs(tf.image.total_variation(self.enhanced_patch)-tf.image.total_variation(self.dslr_patch)))
         
         # calculate generator loss as a weighted sum of the above 4 losses
         self.G_loss = self.color_loss * self.w_color + self.texture_loss * self.w_texture + self.content_loss * self.w_content + self.tv_loss * self.w_tv
@@ -260,6 +260,7 @@ class WESPE(object):
             #index = np.random.randint(len(test_list_phone))
             index = i
             indexes.append(index)
+            start_new = time.time()
             test_image_phone = preprocess(scipy.misc.imread(test_list_phone[index], mode = "RGB").astype("float32"))
             '''
             test_image_enhanced = self.sess.run(self.enhanced_test_unknown , feed_dict={self.phone_test_unknown:[test_image_phone]})
@@ -268,9 +269,10 @@ class WESPE(object):
             PSNR = calc_PSNR(postprocess(test_image_enhanced[0]), postprocess(test_image_phone))
             '''
             test_image_enhanced, test_image_reconstructed = self.sess.run([self.enhanced_test_unknown, self.reconstructed_test_unknown] , feed_dict={self.phone_test_unknown:[test_image_phone]})
-            imageio.imwrite(("./samples/%s/image/phone_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_phone))
+#            imageio.imwrite(("./samples/%s/image/phone_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_phone))
             imageio.imwrite(("./samples/%s/image/enhanced_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_enhanced[0]))
-            imageio.imwrite(("./samples/%s/image/reconstructed_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_reconstructed[0]))
+            print("Time taken for Image {} = {}".format(i,time.time()-start_new))
+#            imageio.imwrite(("./samples/%s/image/reconstructed_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_reconstructed[0]))
             PSNR = calc_PSNR(postprocess(test_image_enhanced[0]), postprocess(test_image_phone))
             
             #print("PSNR: %.3f" %PSNR)

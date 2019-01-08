@@ -29,7 +29,7 @@ def net(path_to_vgg_net, input_image):
     for i, name in enumerate(layers):
         layer_type = name[:4]
         if layer_type == 'conv':
-            kernels, bias = weights[i][0][0][0][0]
+            kernels, bias = weights[i][0][0][2][0]
             kernels = np.transpose(kernels, (1, 0, 2, 3))
             bias = bias.reshape(-1)
             current = _conv_layer(current, kernels, bias)
@@ -47,3 +47,5 @@ def _conv_layer(input, weights, bias):
 
 def _pool_layer(input):
     return tf.nn.max_pool(input, ksize=(1, 2, 2, 1), strides=(1, 2, 2, 1), padding='SAME')
+#phone_patch = 0
+#net("../vgg_pretrained/imagenet-vgg-verydeep-19.mat",phone_patch * 255)

@@ -2,10 +2,12 @@ from __future__ import division
 import tensorflow as tf
 import numpy as np
 import scipy.stats as st
+import cv2
 
 mean_RGB = np.array([123.68, 116.779, 103.939])
 
 def preprocess(img):
+#     print(img.shape)
     return (img - mean_RGB)/255 
 
 def postprocess(img):
@@ -34,3 +36,6 @@ def gauss_kernel(kernlen=21, nsig=3, channels=1):
 def gaussian_blur(x):
     kernel_var = gauss_kernel(21, 3, 3)
     return tf.nn.depthwise_conv2d(x, kernel_var, [1, 1, 1, 1], padding='SAME')
+
+def resize(x,n):
+    return cv2.resize(x,None,fx=n, fy=n, interpolation = cv2.INTER_CUBIC)
