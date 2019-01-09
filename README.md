@@ -9,6 +9,7 @@
 </p>
 <br>
 ***
+
 ![Model from paper](Reference/DPED_old/enhanced_5.png)
 <br>
 <p align="center">
@@ -16,6 +17,7 @@
 </p>
 <br>
 ***
+
 ![Change 1 ](Reference/DPED_DL/enhanced_5.png)
 <br>
 <p align="center">
@@ -23,6 +25,7 @@
 </p>
 <br>
 ***
+
 ![Change 2 ](Reference/DPED_new/enhanced_5.png)
 <br>
 <p align="center">
