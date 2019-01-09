@@ -6,7 +6,7 @@ import time
 from glob import glob
 import scipy.misc
 import scipy.io
-from scipy.misc import imresize
+# from scipy.misc import imresize
 
 from random import shuffle
 import imageio
@@ -16,18 +16,18 @@ from ops import *
 
 def load_img(image_path, mode = "RGB"):
     if mode == "RGB":
-        return scipy.misc.imread(image_path, mode = "RGB")
+        return scipy.ndimage.imread(image_path, mode = "RGB")
     else: 
-        return scipy.misc.imread(image_path, mode = "YCbCr")
+        return scipy.ndimage.imread(image_path, mode = "YCbCr")
 
 def save_img(img, path):
     imageio.imwrite(path, img)
     return 0
 
-def resize_img(x, shape):
-    x = np.copy(x).astype(np.uint8)
-    y = imresize(x, shape, interp='bicubic')
-    return y
+# def resize_img(x, shape):
+#     x = np.copy(x).astype(np.uint8)
+#     y = imresize(x, shape, interp='bicubic')
+#     return y
 
 def calc_PSNR(img1, img2):
     #assume RGB image

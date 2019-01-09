@@ -24,7 +24,8 @@ class WESPE(object):
         self.channels = config.channels
         self.augmentation = config.augmentation
         self.checkpoint_dir = config.checkpoint_dir
-        
+        self.sample_dir = config.sample_dir
+        self.result_img_dir = config.result_img_dir
         self.content_layer = config.content_layer
         self.vgg_dir = config.vgg_dir
         
@@ -35,12 +36,14 @@ class WESPE(object):
         
         # loss weights
         self.w_content = config.w_content
+        self.w_profile = config.w_profile
         self.w_texture = config.w_texture 
         self.w_color = config.w_color
         self.w_tv = config.w_tv
         self.gamma = config.gamma
 
         #total losses
+        self.total_profile_loss = 0
         self.total_color_loss = 0
         self.total_var_loss = 0
         self.total_texture_loss = 0
@@ -86,17 +89,22 @@ class WESPE(object):
     def build_generator_loss(self):
         # content loss (vgg feature distance between original & reconstructed)
         original_vgg = net(self.vgg_dir, self.canon_patch * 255)
-        reconstructed_vgg = net(self.vgg_dir, self.enhanced_patch * 255)
-        self.content_loss = tf.reduce_mean(tf.square(original_vgg[self.content_layer] - reconstructed_vgg[self.content_layer])) 
+        enhanced_vgg = net(self.vgg_dir, self.enhanced_patch * 255)
         
-        # color loss (gan, enhanced-DIV2K)
-        self.color_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_color, self.logits_enhanced_color))
+        #content loss
+        content_loss = tf.reduce_mean(tf.square(original_vgg[self.content_layer] - enhanced_vgg[self.content_layer])) 
         
-        # texture loss (gan, enhanced-DIV2K)
-        self.texture_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_texture, self.logits_enhanced_texture))
+        #profile loss(gan, enhanced-div2k)
+        profile_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_profile, self.logits_enhanced_profile))
+        
+        # color loss (gan, enhanced-original)
+        color_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_original_color, self.logits_enhanced_color))
+        
+        # texture loss (gan, enhanced-original)
+        texture_loss = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_original_texture, self.logits_enhanced_texture))
         
         # tv loss (total variation of enhanced)
-        self.tv_loss = tf.reduce_mean(tf.abs(tf.image.total_variation(self.enhanced_patch)-tf.image.total_variation(self.canon_patch)))
+        tv_loss = tf.reduce_mean(tf.abs(tf.image.total_variation(self.enhanced_patch)-tf.image.total_variation(self.canon_patch)))
         
         #computing expected mean sq.loss
 #         self.total_content_loss = self.gamma*self.total_content_loss+(1-self.gamma)*tf.square(self.content_loss)
@@ -106,38 +114,66 @@ class WESPE(object):
 
         # calculate generator loss as a weighted sum of the above 4 losses
 #         self.G_loss = (1-self.gamma)*(tf.square(self.color_loss) * self.w_color/tf.sqrt(self.total_color_loss) + tf.square(self.texture_loss) * self.w_texture/tf.sqrt(self.total_texture_loss) + tf.square(self.content_loss) * self.w_content/tf.sqrt(self.total_content_loss) + tf.square(self.tv_loss) * self.w_tv/tf.sqrt(self.total_var_loss))
-        self.G_loss = self.w_content*self.content_loss+self.w_color*self.color_loss+self.w_texture*self.texture_loss+self.w_tv*self.tv_loss
+        self.content_loss = content_loss
+        self.tv_loss = tv_loss
+        self.color_loss = color_loss
+        self.profile_loss = profile_loss
+        self.texture_loss = texture_loss
+        self.G_loss = self.w_content*content_loss+self.w_profile*profile_loss+self.w_color*color_loss+self.w_texture*texture_loss+self.w_tv*tv_loss
         self.G_optimizer = tf.train.AdamOptimizer(self.config.learning_rate).minimize(self.G_loss, var_list=self.g_var)
     
-    def build_discriminator(self): 
-        self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'blur')
-#         self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'none')
-        self.logits_DIV2K_texture, _ = modules.discriminator_network(self.canon_patch, var_scope = 'discriminator_texture', preprocess = 'gray')
-        
-        self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'blur')
-#         self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'none')
-        self.logits_enhanced_texture, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_texture', preprocess = 'gray')
-        
-        #_, self.prob = modules.discriminator_network(self.phone_test)
-           
+    def build_discriminator_unit(self, generated_patch, actual_patch, preprocess, scope_name):
+        actual, _ = modules.discriminator_network(actual_patch, var_scope = scope_name, preprocess = preprocess)
+        fake ,_ = modules.discriminator_network(generated_patch, var_scope = scope_name, preprocess = preprocess)
         variables = tf.trainable_variables()
-        self.d_var_color = [x for x in variables if 'discriminator_color' in x.name]
-        print("Completed building color discriminator. Number of variables:",len(self.d_var_color))
-        
-        d_loss_real_color = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_color, tf.ones_like(self.logits_DIV2K_color)))
-        d_loss_fake_color = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_enhanced_color, tf.zeros_like(self.logits_enhanced_color)))
-        
-        self.d_loss_color = d_loss_real_color + d_loss_fake_color
+        d_vars = [x for x in variables if scope_name in x.name]
+        print("Completed building %s discriminator. Number of variables = %d" %(scope_name,len(d_vars)))
+
+        loss_real = tf.reduce_mean(sigmoid_cross_entropy_with_logits(actual, tf.ones_like(actual)))
+        loss_fake = tf.reduce_mean(sigmoid_cross_entropy_with_logits(fake, tf.zeros_like(fake)))
+        total_loss = loss_real+loss_fake
+
+        return total_loss, d_vars, actual, fake
+
+    def build_discriminator(self):
+        self.d_loss_profile, self.d_var_profile, self.logits_DIV2K_profile, self.logits_enhanced_profile = self.build_discriminator_unit(self.enhanced_patch,self.DIV2K_patch,'blur','discriminator_profile')
+        self.d_loss_color, self.d_var_color, self.logits_original_color, self.logits_enhanced_color = self.build_discriminator_unit(self.enhanced_patch,self.canon_patch,'none','discriminator_color')
+        self.d_loss_texture, self.d_var_texture, self.logits_original_texture, self.logits_enhanced_texture = self.build_discriminator_unit(self.enhanced_patch,self.canon_patch,'gray','discriminator_texture')
+
+        #optimizers
+        self.D_optimizer_profile = tf.train.AdamOptimizer(self.config.learning_rate).minimize(self.d_loss_profile, var_list=self.d_var_profile)
         self.D_optimizer_color = tf.train.AdamOptimizer(self.config.learning_rate).minimize(self.d_loss_color, var_list=self.d_var_color)
-        
-        self.d_var_texture = [x for x in variables if 'discriminator_texture' in x.name]
-        print("Completed building texture discriminator. Number of variables:",len(self.d_var_texture))
-        
-        d_loss_real_texture = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_texture, tf.ones_like(self.logits_DIV2K_texture)))
-        d_loss_fake_texture = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_enhanced_texture, tf.zeros_like(self.logits_enhanced_texture)))
-        
-        self.d_loss_texture = d_loss_real_texture + d_loss_fake_texture
         self.D_optimizer_texture = tf.train.AdamOptimizer(self.config.learning_rate).minimize(self.d_loss_texture, var_list=self.d_var_texture)
+
+#     def build_discriminator(self): 
+#         self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'blur')
+# #         self.logits_DIV2K_color, _ = modules.discriminator_network(self.DIV2K_patch, var_scope = 'discriminator_color', preprocess = 'none')
+#         self.logits_DIV2K_texture, _ = modules.discriminator_network(self.canon_patch, var_scope = 'discriminator_texture', preprocess = 'gray')
+        
+#         self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'blur')
+# #         self.logits_enhanced_color, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_color', preprocess = 'none')
+#         self.logits_enhanced_texture, _ = modules.discriminator_network(self.enhanced_patch, var_scope = 'discriminator_texture', preprocess = 'gray')
+        
+#         #_, self.prob = modules.discriminator_network(self.phone_test)
+           
+#         variables = tf.trainable_variables()
+#         self.d_var_color = [x for x in variables if 'discriminator_color' in x.name]
+#         print("Completed building color discriminator. Number of variables:",len(self.d_var_color))
+        
+#         d_loss_real_color = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_color, tf.ones_like(self.logits_DIV2K_color)))
+#         d_loss_fake_color = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_enhanced_color, tf.zeros_like(self.logits_enhanced_color)))
+        
+#         self.d_loss_color = d_loss_real_color + d_loss_fake_color
+#         self.D_optimizer_color = tf.train.AdamOptimizer(self.config.learning_rate).minimize(self.d_loss_color, var_list=self.d_var_color)
+        
+#         self.d_var_texture = [x for x in variables if 'discriminator_texture' in x.name]
+#         print("Completed building texture discriminator. Number of variables:",len(self.d_var_texture))
+        
+#         d_loss_real_texture = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_DIV2K_texture, tf.ones_like(self.logits_DIV2K_texture)))
+#         d_loss_fake_texture = tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.logits_enhanced_texture, tf.zeros_like(self.logits_enhanced_texture)))
+        
+#         self.d_loss_texture = d_loss_real_texture + d_loss_fake_texture
+#         self.D_optimizer_texture = tf.train.AdamOptimizer(self.config.learning_rate).minimize(self.d_loss_texture, var_list=self.d_var_texture)
         
     def train(self, load = True):
         if load == True:
@@ -149,19 +185,30 @@ class WESPE(object):
             print(" Overall training starts from beginning")
         start = time.time()
         for i in range(0, self.config.train_iter):
+            #create batches
             phone_batch, canon_batch, DIV2K_batch = get_batch(self.dataset_phone, self.dataset_canon, self.dataset_DIV2K, self.config)
+            
+            #Run generator
             _, enhanced_batch = self.sess.run([self.G_optimizer, self.enhanced_patch] , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
-            _ = self.sess.run(self.D_optimizer_color , feed_dict={self.phone_patch:phone_batch, self.DIV2K_patch:DIV2K_batch})
-            _ = self.sess.run(self.D_optimizer_texture , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch})
+            
+            #Run discriminator for profile
+            _ = self.sess.run(self.D_optimizer_profile , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
+            
+            #Run discriminator for color
+            _ = self.sess.run(self.D_optimizer_color , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
+
+            #Run discriminator for texture
+            _ = self.sess.run(self.D_optimizer_texture , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
+            
             if i %self.config.test_every == 0:
                 phone_batch, canon_batch, DIV2K_batch = get_batch(self.dataset_phone, self.dataset_canon, self.dataset_DIV2K, self.config)
                 print(phone_batch.shape,canon_batch.shape,DIV2K_batch.shape)
-                g_loss, color_loss, texture_loss, content_loss, tv_loss = self.sess.run([self.G_loss, self.color_loss, self.texture_loss, self.content_loss, self.tv_loss] , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
+                g_loss, content_loss, profile_loss, color_loss, texture_loss, tv_loss = self.sess.run([self.G_loss, self.content_loss, self.profile_loss, self.color_loss, self.texture_loss, self.tv_loss] , feed_dict={self.phone_patch:phone_batch, self.canon_patch:canon_batch, self.DIV2K_patch:DIV2K_batch})
                 print("Iteration %d, runtime: %.3f s, generator loss: %.6f" %(i, time.time()-start, g_loss))      
-                print("Loss per component: content %.6f, color %.6f, texture %.6f, tv %.6f" %(content_loss, color_loss, texture_loss, tv_loss))
+                print("Loss per component: content %.6f,profile %.6f, color %.6f, texture %.6f, tv %.6f" %(content_loss, profile_loss, color_loss, texture_loss, tv_loss))
                 #print("Loss per component: total_content %.4f, total_color %.4f, total_texture %.4f, total_tv %.4f" %(sqrt(total_content_loss), sqrt(total_color_loss), sqrt(total_texture_loss), sqrt(total_var_loss)))
                 # during training, test for only patches (full image testing incurs memory issues...)
-                self.test_generator(200, 0)
+                self.test_generator(100, 0)
                 self.save()
     
     def test_generator(self, test_num_patch = 200, test_num_image = 5, load = False):
@@ -182,17 +229,16 @@ class WESPE(object):
         for i in range(test_num_patch):
             index = np.random.randint(len(test_list_phone))
             indexes.append(index)
-            test_img = scipy.misc.imread(test_list_phone[index], mode = "RGB").astype("float32")
+            test_img = scipy.ndimage.imread(test_list_phone[index], mode = "RGB").astype("float32")
             test_patch_phone = get_patch(test_img,self.config.patch_size)
             test_patch_phone = preprocess(test_patch_phone)
 
             test_patch_enhanced= self.sess.run([self.enhanced_test] , feed_dict={self.phone_test:[test_patch_phone]})
             if i % 50 == 0:
-                #print(test_patch_enhanced[0].shape)
-                imageio.imwrite(("./samples_DIV2K/%s/patch/phone_%d.png" %(self.config.dataset_name, i)), postprocess(test_patch_phone))
-                imageio.imwrite(("./samples_DIV2K/%s/patch/enhanced_%d.png" %(self.config.dataset_name,i)), postprocess(test_patch_enhanced[0][0]))
-                #imageio.imwrite(("./samples_DIV2K/%s/patch/reconstructed_%d.png" %(self.config.dataset_name,i)), postprocess(test_patch_reconstructed[0]))
-            #print(enhanced_test_patch.shape)
+
+                imageio.imwrite(("%s/phone_%d.png" %(self.result_img_dir, i)), postprocess(test_patch_phone))
+                imageio.imwrite(("%s/enhanced_%d.png" %(self.result_img_dir,i)), postprocess(test_patch_enhanced[0][0]))
+
             PSNR = calc_PSNR(postprocess(test_patch_enhanced[0]), postprocess(test_patch_phone))
             #print("PSNR: %.3f" %PSNR)
             PSNR_phone_enhanced_list[i] = PSNR
@@ -216,8 +262,8 @@ class WESPE(object):
             test_image_phone = preprocess(scipy.misc.imread(test_list_phone[index], mode = "RGB").astype("float32"))
 
             test_image_enhanced = self.sess.run([self.enhanced_test_unknown] , feed_dict={self.phone_test_unknown:[test_image_phone]})
-            imageio.imwrite(("./samples_DIV2K/%s/image/phone_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_phone))
-            imageio.imwrite(("./samples_DIV2K/%s/image/enhanced_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_enhanced[0][0]))
+            imageio.imwrite(("%s/phone_%d.png" %(self.sample_dir, i)), postprocess(test_image_phone))
+            imageio.imwrite(("%s/enhanced_%d.png" %(self.sample_dir, i)), postprocess(test_image_enhanced[0][0]))
             #imageio.imwrite(("./samples_DIV2K/%s/image/reconstructed_%d.png" %(self.config.dataset_name, i)), postprocess(test_image_reconstructed[0]))
             
             PSNR = calc_PSNR(postprocess(test_image_enhanced[0]), postprocess(test_image_phone))
