@@ -1,22 +1,32 @@
-Weakly supervised model with smoother edges which also runs faster
+###Improved image enhancement
 
-## Results
-![Before 1](samples_DIV2K/iphone/image/phone_0.png)
-Before
-![After 1](samples_DIV2K/iphone/image/enhanced_0.png)
-After
-![Before 2](samples_DIV2K/iphone/image/phone_1.png)
-Before
-![After 2](samples_DIV2K/iphone/image/enhanced_1.png)
-After
-![Before 3](samples_DIV2K/iphone/image/phone_2.png)
-Before
-![After 3](samples_DIV2K/iphone/image/enhanced_2.png)
-After
-![Before 4](samples_DIV2K/iphone/image/phone_3.png)
-Before
-![After 4](samples_DIV2K/iphone/image/enhanced_3.png)
-After
+![Original Image](Reference/Originals/phone_5.png)
+<br>
+**Model from paper**
+<br>
+<br>
+***
+![Model from paper](Reference/DPED_old/enhanced_5.png)
+<br>
+**Model from paper**
+<br>
+<br>
+***
+![Change 1 ](Reference/DPED_DL/enhanced_5.png)
+<br>
+**Change after introducing smoothing**
+<br>
+<br>
+***
+![Change 2 ](Reference/DPED_new/enhanced_5.png)
+<br>
+**Change after introducing profile discriminator**
+<br>
+<br>
+***
+
+
+
 
 
 
