@@ -1,7 +1,7 @@
 
 import os
 from easydict import EasyDict as edict
-from WESPE_torch import WESPE
+from ImageEnhancement.WESPE_torch import WESPE
 
 config = edict()
 
@@ -15,7 +15,7 @@ config.learning_rate = 1e-4
 config.augmentation = True #data augmentation (flip, rotation)
 config.test_every = 200
 config.train_iter = 50000
-config.data_loader_workers = 16
+config.data_loader_workers = 4
 config.pin_memory = 2
 # config.sample_size = 100000
 

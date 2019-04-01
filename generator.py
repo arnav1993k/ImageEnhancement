@@ -1,5 +1,5 @@
 import torch.nn as nn
-from block_torch import InceptionBlock
+from ImageEnhancement.block_torch import InceptionBlock
 import torch
 
 class Generator(nn.Module):

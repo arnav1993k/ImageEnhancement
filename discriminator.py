@@ -1,5 +1,5 @@
 import torch.nn as nn
-from ops_torch import gaussian_blur
+from ImageEnhancement.ops_torch import gaussian_blur
 import torch
 import torch.nn.functional as F
 

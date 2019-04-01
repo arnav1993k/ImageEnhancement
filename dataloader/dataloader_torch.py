@@ -4,7 +4,7 @@ import time
 from glob import glob
 import scipy.misc
 import scipy.io
-from ..ops_torch import preprocess
+from ImageEnhancement.ops_torch import preprocess
 import torchvision.transforms as ttransforms
 
 

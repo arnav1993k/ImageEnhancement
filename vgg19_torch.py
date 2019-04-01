@@ -74,13 +74,3 @@ def _conv_layer(input, weights, bias):
     
 def _pool_layer(input):
     return F.max_pool2d(input, 2, stride=1)
-    
-
-#def _conv_layer(input, weights, bias):
-#    conv = tf.nn.conv2d(input, tf.constant(weights), strides=(1, 1, 1, 1), padding='SAME')
-#    return tf.nn.bias_add(conv, bias)
-#
-#def _pool_layer(input):
-#    return tf.nn.max_pool(input, ksize=(1, 2, 2, 1), strides=(1, 2, 2, 1), padding='SAME')
-#phone_patch = 0
-#net("../vgg_pretrained/imagenet-vgg-verydeep-19.mat",phone_patch * 255)
