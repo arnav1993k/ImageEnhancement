@@ -6,15 +6,15 @@ import scipy.misc
 import scipy.io
 import imageio
 
-from generator import Generator
-from discriminator import Discriminator
+from .generator import Generator
+from .discriminator import Discriminator
 import torch
 import torch.nn as nn
-from dataloader.dataloader_torch import Dataset, get_patch
-from vgg19_torch import net
+from .dataloader.dataloader_torch import Dataset, get_patch
+from .vgg19_torch import net
 
-from ops_torch import preprocess, postprocess
-from utils import calc_PSNR
+from .ops_torch import preprocess, postprocess
+from .utils.utils import calc_PSNR
 
 
 
@@ -44,10 +44,6 @@ class WESPE(object):
                                                        num_workers=self.config.data_loader_workers,
                                                        pin_memory=self.config.pin_memory,
                                                        drop_last=True)
-        
-        # self.dataset_phone = dataset_phone
-        # self.dataset_canon = dataset_canon
-        # self.dataset_DIV2K = dataset_DIV2K        
 
         # Loss Weights
         self.w_content = config.w_content
