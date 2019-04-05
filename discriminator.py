@@ -45,12 +45,12 @@ class Discriminator(nn.Module):
     def forward(self, image, preprocess = 'gray'):
 
         if preprocess == 'gray':
-            print("Discriminator-texture")
+            # print("Discriminator-texture")
             image_processed = 0.299*image[:,0,:,:] + 0.587*image[:,1,:,:] + 0.114*image[:,2,:,:]
             image_processed = image_processed.unsqueeze(1)
 
         elif preprocess == 'blur':
-            print("Discriminator-color (blur)")
+            # print("Discriminator-color (blur)")
             conv_filter = torch.Tensor([[0.299, -0.14714119, 0.61497538], [0.587, -0.28886916, -0.51496512], [0.114, 0.43601035, -0.10001026]])
             conv_filter = conv_filter.unsqueeze(2)
             conv_filter = conv_filter.unsqueeze(3)
@@ -62,7 +62,7 @@ class Discriminator(nn.Module):
             image_processed = gaussian_blur(image)
 
         else:
-            print("Discriminator-color (none)")
+            # print("Discriminator-color (none)")
             image_processed = image
 
         temp = self.conv1(image_processed)

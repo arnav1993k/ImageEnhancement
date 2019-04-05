@@ -6,16 +6,16 @@ from ImageEnhancement.WESPE_torch import WESPE
 config = edict()
 
 # training parameters
-config.batch_size = 64#32
+config.batch_size = 32#32
 config.patch_size = 100
 config.mode = "RGB"
 config.channels = 3
 config.content_layer = 'relu2_2' # originally relu5_4 in DPED
 config.learning_rate = 1e-4
 config.augmentation = True #data augmentation (flip, rotation)
-config.test_every = 200
+config.test_every = 2
 config.train_iter = 50000
-config.data_loader_workers = 4
+config.data_loader_workers = 1
 config.pin_memory = 2
 # config.sample_size = 100000
 
@@ -30,14 +30,14 @@ config.model_name = "WESPE_DIV2K_arnav_gpu1"
 
 # directories
 config.dataset_name = "iphone"
-config.train_path_phone = os.path.join("/home/grads/v/vineet/Downloads/DPED/dped/iphone/training_data/iphone","*.jpg")
-config.train_path_canon = os.path.join("/home/grads/v/vineet/Downloads/DPED/dped/iphone/training_data/canon","*.jpg")
-config.train_path_DIV2K = os.path.join("/home/grads/v/vineet/Downloads/DPED/DIV2K_train_HR","*.png")
+config.train_path_phone = os.path.join("/raid/Image/WESPE/DPED/original_images/train/iphone","*.jpg")
+config.train_path_canon = os.path.join("/raid/Image/WESPE/DPED/original_images/train/canon","*.jpg")
+config.train_path_DIV2K = os.path.join("/raid/Image/WESPE/DIV2K_HR/DIV2K_train_HR","*.png")
 
-config.test_path_phone_patch = os.path.join("/home/grads/v/vineet/Downloads/DPED/sample_images/original_images/iphone","*.jpg")
-config.test_path_phone_image = os.path.join("/home/grads/v/vineet/Downloads/DPED/sample_images/original_images/iphone","*.jpg")
+config.test_path_phone_patch = os.path.join("/raid/Image/WESPE/DPED/original_images/test/sony","*.jpg")
+config.test_path_phone_image = os.path.join("/raid/Image/WESPE/DPED/original_images/test/sony","*.jpg")
 
-config.vgg_dir = "./vgg_pretrained/imagenet-vgg-verydeep-19.mat"
+config.vgg_dir = "/raid/Image/WESPE/vgg_pretrained/imagenet-vgg-verydeep-19.mat"
 
 config.result_dir = os.path.join("./result_1", config.model_name)
 config.result_img_dir = os.path.join(config.result_dir, "samples")

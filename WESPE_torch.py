@@ -6,6 +6,7 @@ import scipy.io
 import imageio
 import torch
 import torch.nn as nn
+import torchvision
 
 from ImageEnhancement.generator import Generator
 from ImageEnhancement.discriminator import Discriminator
@@ -31,7 +32,10 @@ class WESPE(object):
         self.sample_dir = config.sample_dir
         self.result_img_dir = config.result_img_dir
         self.content_layer = config.content_layer
-        self.vgg_dir = config.vgg_dir
+        vgg19_net = torchvision.models.vgg19(pretrained=True)
+        feature_mapper = list(vgg19_net.children())[0]
+        self.vgg_net = feature_mapper
+        del vgg19_net
 
         # Data
         self.dataset_name = config.dataset_name
@@ -65,8 +69,9 @@ class WESPE(object):
         self.discriminator3 = Discriminator(in_channels=1)
         
         if torch.cuda.is_available():
-            self.generator, self.discriminator1, self.discriminator2, self.discriminator3 = \
-            self.generator.cuda(), self.discriminator1.cuda(), self.discriminator2.cuda(), self.discriminator3.cuda()
+            self.generator, self.discriminator1, self.discriminator2, self.discriminator3, self.vgg_net = \
+            self.generator.cuda(), self.discriminator1.cuda(), self.discriminator2.cuda(), self.discriminator3.cuda(), \
+            self.vgg_net.cuda()
 
         # Network Optimizers
         self.optimizer_G = torch.optim.Adam(self.generator.parameters())
@@ -109,7 +114,7 @@ class WESPE(object):
             self.train_one_epoch(i)
 
             
-    def train_one_epoch(self):
+    def train_one_epoch(self, i):
         
         start = time.time()
         
@@ -119,76 +124,99 @@ class WESPE(object):
         self.total_texture_loss = 0
         self.total_content_loss = 0
 
-        for i in range(self.config.train_iter):
+        for step, (phone_patch, canon_patch, DIV2K_patch) in enumerate(self.data_loader):
 
-            for step, (phone_patch, canon_patch, DIV2K_patch) in enumerate(self.data_loader):
+            phone_patch, canon_patch, DIV2K_patch = phone_patch.float(), canon_patch.float(), DIV2K_patch.float()
 
-                phone_patch, canon_patch, DIV2K_patch = phone_patch.float(), canon_patch.float(), DIV2K_patch.float()
-                
-                if torch.cuda.is_available():
-                    phone_patch, canon_patch, DIV2K_patch = phone_patch.cuda(), canon_patch.cuda(), DIV2K_patch.cuda()
-                
-                self.optimizer_G.zero_grad()
+            if torch.cuda.is_available():
+                phone_patch, canon_patch, DIV2K_patch = phone_patch.cuda(), canon_patch.cuda(), DIV2K_patch.cuda()
 
-                # Generator
-                enhanced_patch = self.generator(phone_patch)
-                
-                # Discrimiator 1
-                d_loss_profile, logits_DIV2K_profile, logits_enhanced_profile = self.build_discriminator_unit(enhanced_patch, DIV2K_patch, index=1, preprocess='blur')
-                
-                # Discrimiator 2
-                d_loss_color, logits_original_color, logits_enhanced_color = self.build_discriminator_unit(enhanced_patch, canon_patch, index=2, preprocess='none')
-                
-                # Discrimiator 3
-                d_loss_texture, logits_original_texture, logits_enhanced_texture = self.build_discriminator_unit(enhanced_patch, canon_patch, index=3, preprocess='gray')
+            self.optimizer_G.zero_grad()
 
-                # Generator Loss
-                original_vgg = net(self.vgg_dir, canon_patch * 255)
-                enhanced_vgg = net(self.vgg_dir, enhanced_patch * 255)
-                
-                #content loss
-                content_loss = torch.mean(torch.pow(original_vgg[self.content_layer] - enhanced_vgg[self.content_layer], 2))
-                
-                #profile loss(gan, enhanced-div2k)
-                profile_loss = self.loss_fn_D(logits_DIV2K_profile, logits_enhanced_profile)
-                
-                # color loss (gan, enhanced-original)
-                color_loss = self.loss_fn_D(logits_original_color, logits_enhanced_color)
-                
-                # texture loss (gan, enhanced-original)
-                texture_loss = self.loss_fn_D(logits_original_texture, logits_enhanced_texture)
-                
-                # tv loss (total variation of enhanced)
-                tv_loss = torch.mean(torch.abs(self.total_variation_loss(enhanced_patch) - self.total_variation_loss(canon_patch)))
+            # Generator
+            enhanced_patch = self.generator(phone_patch)
 
-                g_loss = self.w_content*content_loss + self.w_profile*profile_loss + self.w_color*color_loss + self.w_texture*texture_loss + self.w_tv*tv_loss
+            # Discrimiator 1
+            d_loss_profile, logits_DIV2K_profile, logits_enhanced_profile = self.build_discriminator_unit(enhanced_patch, DIV2K_patch, index=1, preprocess='blur')
 
-                g_loss.backward(retain_graph=True)
-                self.optimizer_G.step()
+            # Discrimiator 2
+            d_loss_color, logits_original_color, logits_enhanced_color = self.build_discriminator_unit(enhanced_patch, canon_patch, index=2, preprocess='none')
 
-                self.optimizer_D1.zero_grad()
-                self.optimizer_D2.zero_grad()
-                self.optimizer_D3.zero_grad()
+            # Discrimiator 3
+            d_loss_texture, logits_original_texture, logits_enhanced_texture = self.build_discriminator_unit(enhanced_patch, canon_patch, index=3, preprocess='gray')
 
-                d_loss_profile.backward()
-                self.optimizer_D1.step()
+            # Generator Loss
+            original_vgg = self.vgg_net(canon_patch)
+            enhanced_vgg = self.vgg_net(enhanced_patch)
 
-                d_loss_color.backward()
-                self.optimizer_D2.step()
+            #content loss
+            content_loss = torch.mean(torch.pow(original_vgg - enhanced_vgg, 2))
 
-                d_loss_texture.backward()
-                self.optimizer_D3.step()
-                
-                self.total_profile_loss += profile_loss
-                self.total_color_loss += color_loss
-                self.total_var_loss += tv_loss
-                self.total_texture_loss += texture_loss
-                self.total_content_loss += content_loss
-                
-                if i %self.config.test_every == 0:
-                    print("Iteration %d, runtime: %.3f s, generator loss: %.6f" %(i, time.time() - start, g_loss))      
-                    print("Loss per component: content %.6f,profile %.6f, color %.6f, texture %.6f, tv %.6f" %(content_loss, profile_loss, color_loss, texture_loss, tv_loss))
-                    self.test_generator(100, 0)
+            #profile loss(gan, enhanced-div2k)
+            profile_loss = self.loss_fn_D(logits_DIV2K_profile, logits_enhanced_profile)
+
+            # color loss (gan, enhanced-original)
+            color_loss = self.loss_fn_D(logits_original_color, logits_enhanced_color)
+
+            # texture loss (gan, enhanced-original)
+            texture_loss = self.loss_fn_D(logits_original_texture, logits_enhanced_texture)
+
+            # tv loss (total variation of enhanced)
+            tv_loss = torch.mean(torch.abs(self.total_variation_loss(enhanced_patch) - self.total_variation_loss(canon_patch)))
+
+            g_loss = self.w_content*content_loss + self.w_profile*profile_loss + self.w_color*color_loss + self.w_texture*texture_loss + self.w_tv*tv_loss
+
+            g_loss.backward()
+            self.optimizer_G.step()
+            g_loss_value = g_loss.data.item()
+            del d_loss_color, logits_original_color, logits_enhanced_color, d_loss_profile, logits_DIV2K_profile, \
+                logits_enhanced_profile, d_loss_texture, logits_original_texture, logits_enhanced_texture, \
+                original_vgg, enhanced_vgg, phone_patch, color_loss, profile_loss, texture_loss, g_loss
+            torch.cuda.empty_cache()
+
+            enhanced_patch = enhanced_patch.detach()
+            # Discrimiator 1
+            d_loss_profile, logits_DIV2K_profile, logits_enhanced_profile = self.build_discriminator_unit(
+                enhanced_patch, DIV2K_patch, index=1, preprocess='blur')
+
+            # Discrimiator 2
+            d_loss_color, logits_original_color, logits_enhanced_color = self.build_discriminator_unit(
+                enhanced_patch, canon_patch, index=2, preprocess='none')
+
+            # Discrimiator 3
+            d_loss_texture, logits_original_texture, logits_enhanced_texture = self.build_discriminator_unit(
+                enhanced_patch, canon_patch, index=3, preprocess='gray')
+
+            self.optimizer_D1.zero_grad()
+            self.optimizer_D2.zero_grad()
+            self.optimizer_D3.zero_grad()
+
+            d_loss_profile.backward()
+            self.optimizer_D1.step()
+
+            d_loss_color.backward()
+            self.optimizer_D2.step()
+
+            d_loss_texture.backward()
+            self.optimizer_D3.step()
+            content_loss = content_loss.data.item()
+            color_loss = d_loss_color.data.item()
+            profile_loss = d_loss_profile.data.item()
+            texture_loss = d_loss_texture.data.item()
+            tv_loss = tv_loss.data.item()
+            self.total_profile_loss += profile_loss
+            self.total_color_loss += color_loss
+            self.total_var_loss += tv_loss
+            self.total_texture_loss += texture_loss
+            self.total_content_loss += content_loss
+            del d_loss_color, logits_original_color, logits_enhanced_color, d_loss_profile, logits_DIV2K_profile, \
+                logits_enhanced_profile, d_loss_texture, logits_original_texture, logits_enhanced_texture \
+
+            torch.cuda.empty_cache()
+        if i %self.config.test_every == 0:
+            print("Iteration %d, runtime: %.3f s, generator loss: %.6f" %(i, time.time() - start, g_loss_value))
+            print("Loss per component: content %.6f,profile %.6f, color %.6f, texture %.6f, tv %.6f" %(content_loss, profile_loss, color_loss, texture_loss, tv_loss))
+            self.test_generator(100, 0)
     
 
 
@@ -218,7 +246,7 @@ class WESPE(object):
                 test_patch_enhanced = self.generator(test_patch_phone)
             
             test_patch_enhanced = test_patch_enhanced.cpu().data.numpy()
-            test_patch_enhanced = np.transpose(test_patch_enhanced.cpu().data.numpy(), (0,2,3,1))
+            test_patch_enhanced = np.transpose(test_patch_enhanced, (0,2,3,1))
             test_patch_phone = np.transpose(test_patch_phone.cpu().data.numpy(), (0,2,3,1))
 
             if i % 50 == 0:
@@ -237,6 +265,7 @@ class WESPE(object):
 
         indexes = []
         for i in range(test_num_image):
+
             index = i
             indexes.append(index)
             
